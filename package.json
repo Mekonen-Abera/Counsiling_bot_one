@@ -1,0 +1,25 @@
+{
+  "name": "youth_counsiling",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "counseling",
+    "nodejs"
+  ],
+  "author": "Amanuel Habtamu",
+  "license": "ISC",
+  "description": "A Telegram bot for youth counseling.",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
