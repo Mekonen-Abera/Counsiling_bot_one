@@ -1,34 +1,10 @@
 const TelegramBot = require("node-telegram-bot-api");
 require("dotenv").config();
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { webHook: true });
-// Set webhook URL
-const webhookUrl = process.env.WEBHOOK_URL || "https://worker-production-f32b.up.railway.app";
-bot.setWebHook(`${webhookUrl}/bot${process.env.TELEGRAM_BOT_TOKEN}`);
 
-// Webhook endpoint
-const express = require("express");   
-const bodyParser = require("body-parser");
-const app = express();
+// Initialize bot
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 
-app.use(bodyParser.json());
-
-// Handle webhook updates
-app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
-
-// Health check endpoint
-app.get("/", (req, res) => {
-  res.send("Bot is running now go a head check one !");
-});
-
-// Start Express server
-const PORT = process.env.PORT || 8080 ;
-app.listen(PORT, () => {
-  console.log(`Bot is listening on port ${PORT}`);
-});
-
+// Constants
 const ADMIN_IDS = process.env.ADMIN_ID.split(","); // Admin IDs as an array
 const counselors = new Set(); // Approved counselors
 const counselorCategories = {}; // Categories for each counselor
@@ -60,7 +36,6 @@ bot.onText(/\/start/, (msg) => {
       reply_markup: {
         inline_keyboard: [
           [{ text: "Itti Fufa", callback_data: "start_session" }]
-          
         ],
       },
     });
@@ -86,21 +61,37 @@ bot.on("callback_query", (callbackQuery) => {
       bot.sendMessage(chatId, "❌ Jalqabuuf dursitee galmaa'uu qabda.");
       return;
     }
-    bot.sendMessage(chatId, "Baga gara Bootii gorsaa dhuftan! Mee itti fufuuf saala kee filadhu", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "Dhiira 🙍‍♂️", callback_data: "gender_male_user" }],
-          [{ text: "Dhalaa 🙍‍♀️", callback_data: "gender_female_user" }],
-          [{ text: "Filachuu hin barbaadu 🙅", callback_data: "gender_none_user" }],
-        ],
-      },
-    });
+
+    const previousCounselorId = userHistory[chatId]; // Check for previous counselor
+    if (previousCounselorId && counselors.has(previousCounselorId)) {
+      if (sessions[previousCounselorId]) {
+        // Previous counselor is busy
+        bot.sendMessage(chatId, "🚫 Gorsaan kee duraanii yeroo ammaa nama biraa wajjin waan haasa'aa jiruuf , yeroo muraasa booda  itti fufi cuqaasa(button) tuqi.");
+        return;
+      }
+
+      // Reconnect to the previous counselor
+      // bot.sendMessage(chatId, "🔄 Gara gorsaa duraan waliin turteetti deebisaa jira...");
+      startSession(chatId, previousCounselorId);
+    } else {
+      // If no previous counselor or no active session, ask for gender and category
+      bot.sendMessage(chatId, "Baga gara Bootii gorsaa dhuftan! Mee itti fufuuf saala kee filadhu", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Dhiira 🙍‍♂️", callback_data: "gender_male_user" }],
+            [{ text: "Dhalaa 🙍‍♀️", callback_data: "gender_female_user" }],
+            [{ text: "Filachuu hin barbaadu 🙅", callback_data: "gender_none_user" }],
+          ],
+        },
+      });
+    }
   } else if (action === "start_new_session") {
     delete userCategories[chatId];
     delete userGenders[chatId];
 
-    bot.sendMessage(chatId, `👍 Nama kana dura gorsa siif kennaa ture waliin walitti deebi'uuf cuqaasa(button) itti fufi jedhu tuqudhaan mata duree kana dura irratti gorsa fudhachaa turte tuquudhaan gorsaa kee waliin deebi'uu dandeessa. 
-     👇👇👇👇 `, {
+    bot.sendMessage(chatId, `👍 Nama kana dura gorsa siif kennaa ture waliin walitti deebi'uuf
+cuqaasa(button) itti fufi jedhu tuqudhaan gorsaa kee waliin deebi'uu dandeessa. 
+ 👇👇👇👇 `, {
       reply_markup: {
         inline_keyboard: [
           [{ text: "Itti fufi ⏭️", callback_data: "start_session" }]
@@ -120,6 +111,8 @@ bot.on("callback_query", (callbackQuery) => {
         remove_keyboard: true,
       },
     });
+  } else if (action === "end_session_user" || action === "end_session_counselor") {
+    endSession(chatId); // Handle session ending
   }
 });
 
@@ -147,6 +140,7 @@ function connectUserToCounselor(userChatId) {
       (!counselorActiveUsers[counselorId] || counselorActiveUsers[counselorId].size < 2)
     );
   });
+
   if (!availableCounselors.length) {
     return bot.sendMessage(userChatId, "❌ Ammatti namni Bootii kana irratti isin gorsu hin jiru. Gorsitoota keenya kanneen biroo link armaan gadii tuquun argachuu dandeessu @gb_youth_counseling2_bot");
   }
@@ -154,13 +148,53 @@ function connectUserToCounselor(userChatId) {
   startSession(userChatId, availableCounselors[0]);
 }
 
+function startSession(userChatId, counselorId) {
+  sessions[userChatId] = counselorId;
+  sessions[counselorId] = userChatId;
 
+  // Store the counselor as the user's history
+  userHistory[userChatId] = counselorId;
+
+  // Ensure the counselor's active users set exists
+  if (!counselorActiveUsers[counselorId]) {
+    counselorActiveUsers[counselorId] = new Set();
+  }
+  counselorActiveUsers[counselorId].add(userChatId);
+
+  // Retrieve the user's category (fallback to a default message if undefined)
+  const userCategory = userCategories[userChatId] || " duraan irratti gorsa fudhachaa turte";
+
+  // Send session start message to the user
+  bot.sendMessage(
+    userChatId,
+    `🔗 Mata duree ${userCategory} irratti gorsaa kee waliin wal quunnamteetta. Namni gorsa siif kennu yeroo kanatti toorarra jiraachuu dhiisuu waan danda'uf bifa siif danda'amun (barreffamaan ykn sagaleen) ergaa kaa'iif.`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Yeroof addaan kuti", callback_data: "end_session_user" }], // For the user
+        ],
+      },
+    }
+  );
+
+  // Send session start message to the counselor
+  bot.sendMessage(
+    counselorId,
+    `🔗 A user seeking "${userCategory}" counseling has been connected to you. Begin your session.`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "End Session", callback_data: "end_session_counselor" }], // For the counselor
+        ],
+      },
+    }
+  );
+}
 
 // Handle ending sessions
 function endSession(chatId) {
   const counterpartId = sessions[chatId]; // Get the counterpart's ID
   if (!counterpartId) {
-    bot.sendMessage(chatId, "⚠️ No active session to end.");
     return;
   }
 
@@ -178,7 +212,7 @@ function endSession(chatId) {
     },
   });
 
-  bot.sendMessage(counterpartId, "🛑 The session has ended.");
+  bot.sendMessage(counterpartId, "🛑  Yeroof turti gorsaa kee waliin qabdu addaan kuttetta. Itti fuftee maal gochuu barbaadda? itti fufuuf 👉 /start 👈 cuqaasi. ");
 
   // Handle pending requests for counselors if applicable
   if (counselors.has(counterpartId)) {
@@ -190,39 +224,29 @@ function endSession(chatId) {
   }
 }
 
+// Handle callback queries for session control actions
+bot.on("callback_query", (callbackQuery) => {
+  const action = callbackQuery.data;
+  const chatId = callbackQuery.message.chat.id;
 
-  
-function startSession(userChatId, counselorId) {
-  sessions[userChatId] = counselorId;
-  sessions[counselorId] = userChatId;
-
-  userHistory[userChatId] = counselorId;
-
-  if (!counselorActiveUsers[counselorId]) {
-    counselorActiveUsers[counselorId] = new Set();
+  if (action === "end_session_user" || action === "end_session_counselor") {
+      endSession(chatId);  // Same function for both user and counselor
+  } 
+  // else if (action === "start_new_session") {
+  //     bot.sendMessage(chatId, "👍 can now start a new session by selecting your preferences.");
+  // } 
+  else if (action === "disconnect") {
+      bot.sendMessage(chatId, `Bootii kana fayyadamuu keetiif Eebbifami🙏🙏🙏
+        
+Nama gorsa barbaadu kam gara bootii kanatti afeeruun ga'ee ba'adhu.
+        
+Ati garuu gorsa itti fuftee argachuu yoo barbaadde tuqi 👉 /start 👈`);
+  } else if (action === "continue_session_user" || action === "continue_session_counselor") {
+      bot.sendMessage(chatId, "✅ Continuing your session. Feel free to resume your conversation.");
   }
-  counselorActiveUsers[counselorId].add(userChatId);
+});
 
-  // Send "End Session" button to both the user and the counselor
-  bot.sendMessage(userChatId, `🔗Mata duree ${userCategories[userChatId]} irratti gorsaa kee waliin wal quunnamteetta.
-    
-Namni gorsa siif kennu yeroo kanatti toorarra jiraachuu dhiisuu waan danda'uf bifa siif danda'amun(barreffamaan ykn sagaleen) ergaa kaa'iif
-   `, {
-    reply_markup: {
-      inline_keyboard: [ 
-        [{ text: "Yeroof addaan kuti", callback_data: "end_session_user" }]  // For the user
-      ],
-    },
-  });
 
-  bot.sendMessage(counselorId, `🔗 Connected to a user seeking ${userCategories[userChatId]} counseling. Begin your session.`, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "End Session", callback_data: "end_session_counselor" }]  // For the counselor
-      ],
-    },
-  });
-}
 
 
 // Queue pending request
@@ -237,30 +261,6 @@ function queuePendingRequest(userChatId, counselorId) {
     bot.sendMessage(userChatId, "🚫 The queue for your preferred counselor is full. Please try again later.");
   }
 }
-
-// Handle callback queries for session control actions
-bot.on("callback_query", (callbackQuery) => {
-  const action = callbackQuery.data;
-  const chatId = callbackQuery.message.chat.id;
-
-  if (action === "end_session_user" || action === "end_session_counselor") {
-      endSession(chatId);  // Same function for both user and counselor
-  } else if (action === "start_new_session") {You 
-      bot.sendMessage(chatId, "👍 can now start a new session by selecting your preferences.");
-  } else if (action === "disconnect") {
-      bot.sendMessage(chatId, `Bootii kana fayyadamuu keetiif Eebbifami🙏🙏🙏
-        
-Nama gorsa barbaadu kam gara bootii kanatti afeeruun ga'ee ba'adhu.
-        
-Ati garuu gorsa itti fuftee argachuu yoo barbaadde tuqi 👉 /start 👈`);
-  } else if (action === "continue_session_user" || action === "continue_session_counselor") {
-      bot.sendMessage(chatId, "✅ Continuing your session. Feel free to resume your conversation.");
-  }
-});
-
-
-
-
 
   
 
@@ -510,7 +510,7 @@ function handleRejection(counselorId) {
 
 
 
-// End All Sessions
+// End All Sessionss
 function endAllSessions() {
   Object.keys(sessions).forEach(chatId => {
       bot.sendMessage(chatId, "🔔 All sessions have been ended by the admin.");
@@ -583,7 +583,9 @@ bot.on("message", (msg) => {
         }
     } else {
         // If no session, notify the sender
-        bot.sendMessage(chatId, "❌ Yeroo ammaa nama gorsa siif kennu wajjin wal hin quunnamne");
+        bot.sendMessage(chatId, `❌ Yeroo ammaa nama gorsa siif kennu wajjin wal hin quunnamne
+linkii 👉 /start 👈 cuqaasuun itti fufi.          
+`);
     }
 });
 
