@@ -2,7 +2,18 @@ const TelegramBot = require("node-telegram-bot-api");
 require("dotenv").config();
 
 // Initialize bot
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
+  polling: {
+      interval: 300, // Polling interval in ms
+      autoStart: true, // Automatically start polling
+      params: { timeout: 10 } // Timeout for long polling
+  }
+});
+
+bot.on("polling_error", (error) => {
+  console.error("Polling error occurred:", error.code, error.message);
+});
 
 // Constants
 const ADMIN_IDS = process.env.ADMIN_ID.split(","); // Admin IDs as an array
@@ -116,6 +127,19 @@ cuqaasa(button) itti fufi jedhu tuqudhaan gorsaa kee waliin deebi'uu dandeessa.
   }
 });
 
+// Define categories that bypass gender comparison
+const noGenderMatchCategories = [
+ "Amantii fi guddina hafuura 🙏",
+  "Fayyaa sammuu 🧠",
+  "Barumsaa fi galmaa ofii beekuu",
+  "Rakkoo hoogganuu(Crisis Management) 🆘",
+  "kan biraa(Other) 💡",
+  "Aarii to'achuu fi bilchina miiraa 😡",
+   "Barsiisa dogoggoraa(Heresy) ❗"
+];
+
+
+
 // Connect user to counselor
 function connectUserToCounselor(userChatId) {
   const userCategory = userCategories[userChatId];
@@ -133,18 +157,25 @@ function connectUserToCounselor(userChatId) {
   }
 
   const availableCounselors = [...counselors].filter((counselorId) => {
-    return (
-      counselorCategories[counselorId]?.includes(userCategory) &&
-      (userGender === "None" || counselorGenders[counselorId] === userGender) &&
+    const isCategoryMatch = counselorCategories[counselorId]?.includes(userCategory);
+    const isGenderMatch =
+      noGenderMatchCategories.includes(userCategory) || // Skip gender match for specific categories
+      userGender === "None" || // Skip gender match if user selected "None"
+      counselorGenders[counselorId] === userGender; // Otherwise, ensure genders match
+
+    const isCounselorAvailable =
       !sessions[counselorId] &&
-      (!counselorActiveUsers[counselorId] || counselorActiveUsers[counselorId].size < 2)
-    );
+      (!counselorActiveUsers[counselorId] || counselorActiveUsers[counselorId].size < 2);
+
+    return isCategoryMatch && isGenderMatch && isCounselorAvailable;
   });
 
   if (!availableCounselors.length) {
-    return bot.sendMessage(userChatId, "❌ Ammatti namni Bootii kana irratti isin gorsu hin jiru. Gorsitoota keenya kanneen biroo link armaan gadii tuquun argachuu dandeessu @gb_youth_counseling2_bot");
+    return bot.sendMessage(
+      userChatId,
+      "❌ Ammatti namni Bootii kana irratti isin gorsu hin jiru. Gorsitoota keenya kanneen biroo link armaan gadii tuquun argachuu dandeessu @gb_youth_counseling2_bot"
+    );
   }
-
   startSession(userChatId, availableCounselors[0]);
 }
 
