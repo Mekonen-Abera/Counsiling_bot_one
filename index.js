@@ -211,7 +211,7 @@ function startSession(userChatId, counselorId) {
   // Send session start message to the counselor
   bot.sendMessage(
     counselorId,
-    `🔗 A user seeking "${userCategory}" counseling has been connected to you. Begin your session.`,
+    `🔗 Mata duree ${userCategory} irratti nama  gorsa fudhatu waliin wal quunnamteetta. Namni  gorsa fudhatu yeroo kanatti toorarra jiraachuu dhiisuu waan danda'uf bifa siif danda'amun (barreffamaan ykn sagaleen) ergaa kaa'iif.`,
     {
       reply_markup: {
         inline_keyboard: [
